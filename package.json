@@ -1,0 +1,32 @@
+{
+  "name": "duck-facts",
+  "version": "1.0.0",
+  "main": "server.ts",
+  "repository": "git@github.com:EvilKanoa/duck-facts.git",
+  "author": "EvilKanoa <kanoa@kanoa.ca>",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "ts-node-esm server.ts"
+  },
+  "volta": {
+    "node": "16.17.0",
+    "yarn": "1.22.19"
+  },
+  "prettier": {
+    "singleQuote": true,
+    "useTabs": true
+  },
+  "dependencies": {
+    "@tsconfig/node16": "16.1.0",
+    "@types/express": "4.17.17",
+    "@types/node": "20.4.7",
+    "dotenv": "16.3.1",
+    "express": "4.18.2",
+    "node-fetch": "3.3.2",
+    "prettier": "3.0.1",
+    "ts-node": "10.9.1",
+    "typescript": "5.1.6"
+  }
+}
