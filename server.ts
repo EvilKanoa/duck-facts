@@ -1,9 +1,11 @@
 import 'dotenv/config';
 
-import express from 'express';
+import Fastify from 'fastify';
+import fastifySensible from '@fastify/sensible';
 import fetch from 'node-fetch';
 
 import { getFacts, insertFact, findFact } from './cache.ts';
+import { logger } from './logger.ts';
 
 const FACT_EXPIRATION_SECONDS = 60 * 60 * 24;
 const PROMPTS = {
@@ -30,9 +32,9 @@ const chat = async (message: string): Promise<string> => {
 		}),
 	}).then(async (res) => {
 		if (!res.ok) {
-			console.error({ status: res.status, statusText: res.statusText });
+			logger.error({ status: res.status, statusText: res.statusText });
 			try {
-				console.error(JSON.stringify(await res.json()));
+				logger.error(await res.json());
 			} catch {}
 			throw 'bad response from chatgpt :(';
 		}
@@ -43,7 +45,7 @@ const chat = async (message: string): Promise<string> => {
 	const reply = (res as any)?.choices?.[0]?.message?.content;
 
 	if (reply == null || reply.length <= 0) {
-		console.warn(res);
+		logger.warn(res);
 		throw 'cannot parse reply from chatgpt response';
 	}
 
@@ -68,7 +70,7 @@ const generateFact = async (): Promise<{ en: string; fr: string }> => {
 	const fr = await chat(PROMPTS.TRANSLATE_TO_FRENCH(en));
 
 	const fact = { en, fr };
-	console.log('generated fact', fact);
+	logger.info('generated fact', fact);
 	await insertFact(fact);
 	return fact;
 };
@@ -76,26 +78,28 @@ const generateFact = async (): Promise<{ en: string; fr: string }> => {
 const getFact = async (): Promise<{ en: string; fr: string }> => {
 	const cached = await getFacts(Date.now() / 1000 - FACT_EXPIRATION_SECONDS);
 	if (cached.length > 0) {
-		console.log('cache hit');
+		logger.info('cache hit');
 		return cached[Math.floor(Math.random() * cached.length)];
 	}
-	console.log('cache miss');
+	logger.info('cache miss');
 
 	return await generateFact();
 };
 
 const run = async () => {
-	const port = process.env.PORT ?? 8080;
+	const port = parseInt(process.env.PORT ?? '8080');
 	key = process.env.API_KEY;
 
 	if (key == null || key.length <= 0) {
 		throw 'cannot start server without an API_KEY specified!';
 	}
 
-	const app = express();
+	const fastify = Fastify({ logger });
+	fastify.register(fastifySensible);
 
-	app.get('/', (_req, res) => {
-		res.status(200).json({
+	fastify.get('/', async (request, reply) => {
+		reply.code(200);
+		return {
 			routes: [
 				{ path: '/health', description: 'Health check route' },
 				{
@@ -105,36 +109,39 @@ const run = async () => {
 				},
 			],
 			description: 'Duck fact generation server, now powered by AI!',
-		});
+		};
 	});
 
-	app.get('/health', (_req, res) => {
-		res.status(200).json({ status: 'healthy' });
+	fastify.get('/health', async (request, reply) => {
+		reply.code(200);
+		return { status: 'healthy' };
 	});
 
-	app.get('/fact', (_req, res) => {
-		getFact()
-			.then((fact) => {
-				res.status(200).send(`${fact.en}\n${fact.fr}`);
-			})
-			.catch((err) => {
-				console.error(err);
-				res.status(500).send('Internal Server Error');
-			});
+	fastify.get('/fact', async (request, reply) => {
+		try {
+			const fact = await getFact();
+			reply.code(200);
+			return `${fact.en}\n${fact.fr}`;
+		} catch (err) {
+			fastify.log.error(err);
+			throw fastify.httpErrors.internalServerError();
+		}
 	});
 
-	app.get('/bonus', (_req, res) => {
-		generateFact()
-			.then(() => res.sendStatus(201))
-			.catch((err) => {
-				console.error(err);
-				res.sendStatus(500);
-			});
+	fastify.post('/bonus', async (request, reply) => {
+		try {
+			await generateFact();
+			reply.code(201);
+			return 'Created';
+		} catch (err) {
+			fastify.log.error(err);
+			throw fastify.httpErrors.internalServerError();
+		}
 	});
 
-	await new Promise<void>((resolve) => app.listen(port, () => resolve()));
+	await fastify.listen({ port });
 };
 
 run()
-	.then(() => console.log('Duck facts server started!'))
-	.catch((err) => console.error('Failed to start server!', err));
+	.then(() => logger.info('Duck facts server started!'))
+	.catch((err) => logger.error('Failed to start server!', err));
