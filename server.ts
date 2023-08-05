@@ -51,16 +51,25 @@ const chat = async (message: string): Promise<string> => {
 };
 
 const generateFact = async (): Promise<{ en: string; fr: string }> => {
-	const reply = await chat(PROMPTS.GENERATE_FACT());
-	const facts = reply
-		.split(/FACT(?:\s?[0-9]*)?:/gi)
-		.map((fact) => fact.trim())
-		.filter((fact) => fact != null && fact.length);
-	const en = facts[Math.floor(Math.random() * facts.length)];
+	const newFact = async () => {
+		const reply = await chat(PROMPTS.GENERATE_FACT());
+		const facts = reply
+			.split(/FACT(?:\s?[0-9]*)?:/gi)
+			.map((fact) => fact.trim())
+			.filter((fact) => fact != null && fact.length);
+		return facts[Math.floor(Math.random() * facts.length)];
+	};
+
+	let en;
+	do {
+		en = await newFact();
+	} while ((await findFact(en)) != null);
+
 	const fr = await chat(PROMPTS.TRANSLATE_TO_FRENCH(en));
 
 	const fact = { en, fr };
 	console.log('generated fact', fact);
+	await insertFact(fact);
 	return fact;
 };
 
@@ -72,14 +81,7 @@ const getFact = async (): Promise<{ en: string; fr: string }> => {
 	}
 	console.log('cache miss');
 
-	let fact;
-	do {
-		fact = await generateFact();
-	} while ((await findFact(fact.en)) != null);
-
-	console.log('inserted to cache', await insertFact(fact));
-
-	return fact;
+	return await generateFact();
 };
 
 const run = async () => {
@@ -118,6 +120,15 @@ const run = async () => {
 			.catch((err) => {
 				console.error(err);
 				res.status(500).send('Internal Server Error');
+			});
+	});
+
+	app.get('/bonus', (_req, res) => {
+		generateFact()
+			.then(() => res.sendStatus(201))
+			.catch((err) => {
+				console.error(err);
+				res.sendStatus(500);
 			});
 	});
 
