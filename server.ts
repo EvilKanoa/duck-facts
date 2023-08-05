@@ -4,7 +4,13 @@ import Fastify from 'fastify';
 import fastifySensible from '@fastify/sensible';
 import fetch from 'node-fetch';
 
-import { getFacts, insertFact, findFact } from './cache.ts';
+import {
+	getFacts,
+	insertFact,
+	findFact,
+	insertSubscriber,
+	getSubscribers,
+} from './database.ts';
 import { logger } from './logger.ts';
 
 const FACT_EXPIRATION_SECONDS = 60 * 60 * 24;
@@ -121,6 +127,7 @@ const run = async () => {
 		try {
 			const fact = await getFact();
 			reply.code(200);
+			reply.type('text/plain; charset=utf-8');
 			return `${fact.en}\n${fact.fr}`;
 		} catch (err) {
 			fastify.log.error(err);
@@ -128,15 +135,52 @@ const run = async () => {
 		}
 	});
 
-	fastify.post('/bonus', async (request, reply) => {
-		try {
-			await generateFact();
-			reply.code(201);
-			return 'Created';
-		} catch (err) {
-			fastify.log.error(err);
-			throw fastify.httpErrors.internalServerError();
+	fastify.post('/send', async (request, reply) => {
+		const key = process.env.SEND_SECRET ?? undefined;
+		if (
+			key == null ||
+			key.length === 0 ||
+			request.headers.authorization !== key
+		) {
+			throw fastify.httpErrors.unauthorized(
+				'missing or incorrect authorization',
+			);
 		}
+
+		const fact = await getFact();
+		// TODO: Send all subscribers the fact
+		console.log(await getSubscribers());
+		reply.code(201);
+		return 'Sent';
+	});
+
+	fastify.post('/subscribe', async (request, reply) => {
+		const { number } = request.body as any;
+
+		if (typeof number !== 'string' || number.length <= 0) {
+			throw fastify.httpErrors.badRequest(`must provide 'number' property!`);
+		}
+
+		const subscriber = await insertSubscriber(number);
+		reply.code(201);
+    return subscriber;
+	});
+
+	fastify.post('/bonus', async (request, reply) => {
+		const key = process.env.BONUS_SECRET ?? undefined;
+		if (
+			key == null ||
+			key.length === 0 ||
+			request.headers.authorization !== key
+		) {
+			throw fastify.httpErrors.unauthorized(
+				'missing or incorrect authorization',
+			);
+		}
+
+		const fact = await generateFact();
+		reply.code(201);
+		return fact;
 	});
 
 	await fastify.listen({ port });
