@@ -103,3 +103,13 @@ export const insertSubscriber = async (
 		),
 	);
 };
+
+export const removeSubscriber = async (number: string): Promise<void> => {
+	await p((cb) =>
+		db.run(
+			'DELETE FROM subscribers WHERE number = ? COLLATE NOCASE',
+			number,
+			cb,
+		),
+	);
+};

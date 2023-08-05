@@ -10,8 +10,10 @@ import {
 	findFact,
 	insertSubscriber,
 	getSubscribers,
+	removeSubscriber,
 } from './database.ts';
 import { logger } from './logger.ts';
+import { send } from './sms.ts';
 
 const FACT_EXPIRATION_SECONDS = 60 * 60 * 24;
 const PROMPTS = {
@@ -22,6 +24,9 @@ const PROMPTS = {
 } as const;
 
 let key: string | undefined;
+
+const toStr = (fact: { en: string; fr?: string }): string =>
+	`${fact.en}\n${fact.fr ?? ''}`;
 
 const chat = async (message: string): Promise<string> => {
 	const endpoint = 'https://api.openai.com/v1/chat/completions';
@@ -128,7 +133,7 @@ const run = async () => {
 			const fact = await getFact();
 			reply.code(200);
 			reply.type('text/plain; charset=utf-8');
-			return `${fact.en}\n${fact.fr}`;
+			return toStr(fact);
 		} catch (err) {
 			fastify.log.error(err);
 			throw fastify.httpErrors.internalServerError();
@@ -148,8 +153,20 @@ const run = async () => {
 		}
 
 		const fact = await getFact();
-		// TODO: Send all subscribers the fact
-		console.log(await getSubscribers());
+		const factStr = toStr(fact);
+		const subscribers = await getSubscribers();
+
+		fastify.log.info('sending to all subscribers...');
+		await Promise.all(
+			subscribers.map(async (subscriber) => {
+				if (await send(subscriber.number, factStr)) {
+					fastify.log.info(`SEND SUCCESS: ${subscriber.number}`);
+				} else {
+					fastify.log.warn(`SEND FAILURE: ${subscriber.number}`);
+				}
+			}),
+		);
+
 		reply.code(201);
 		return 'Sent';
 	});
@@ -163,7 +180,19 @@ const run = async () => {
 
 		const subscriber = await insertSubscriber(number);
 		reply.code(201);
-    return subscriber;
+		return subscriber;
+	});
+
+	fastify.post('/unsubscribe', async (request, reply) => {
+		const { number } = request.body as any;
+
+		if (typeof number !== 'string' || number.length <= 0) {
+			throw fastify.httpErrors.badRequest(`must provide 'number' property!`);
+		}
+
+		await removeSubscriber(number);
+		reply.code(204);
+		return '';
 	});
 
 	fastify.post('/bonus', async (request, reply) => {
