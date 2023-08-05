@@ -3,11 +3,14 @@ import 'dotenv/config';
 import express from 'express';
 import fetch from 'node-fetch';
 
+import { getFacts, insertFact, findFact } from './cache.ts';
+
+const FACT_EXPIRATION_SECONDS = 60 * 60 * 24;
 const PROMPTS = {
 	GENERATE_FACT: () =>
-		'Please list 10 interesting facts about ducks. Separate each fact with a newline.',
+		'Please list 10 interesting facts about ducks. Please start each fact with the word FACT.',
 	TRANSLATE_TO_FRENCH: (message: string) =>
-		`Translate the following English duck fact in double quotation marks to French: "${message}"`,
+		`Translate the following English duck fact to French: ${message}`,
 } as const;
 
 let key: string | undefined;
@@ -48,18 +51,35 @@ const chat = async (message: string): Promise<string> => {
 };
 
 const generateFact = async (): Promise<{ en: string; fr: string }> => {
-	const en = await chat(PROMPTS.GENERATE_FACT());
-	console.log({ en });
-	// const fr = await chat(PROMPTS.TRANSLATE_TO_FRENCH(en));
+	const reply = await chat(PROMPTS.GENERATE_FACT());
+	const facts = reply
+		.split(/FACT(?:\s?[0-9]*)?:/gi)
+		.map((fact) => fact.trim())
+		.filter((fact) => fact != null && fact.length);
+	const en = facts[Math.floor(Math.random() * facts.length)];
+	const fr = await chat(PROMPTS.TRANSLATE_TO_FRENCH(en));
 
-	return { en, fr: en };
+	const fact = { en, fr };
+	console.log('generated fact', fact);
+	return fact;
 };
 
-const getFact = async (): Promise<string> => {
-	// TODO: Should cache this eventually
-	const { en, fr } = await generateFact();
+const getFact = async (): Promise<{ en: string; fr: string }> => {
+	const cached = await getFacts(Date.now() / 1000 - FACT_EXPIRATION_SECONDS);
+	if (cached.length > 0) {
+		console.log('cache hit');
+		return cached[Math.floor(Math.random() * cached.length)];
+	}
+	console.log('cache miss');
 
-	return `${en}\n\n${fr}`;
+	let fact;
+	do {
+		fact = await generateFact();
+	} while ((await findFact(fact.en)) != null);
+
+	console.log('inserted to cache', await insertFact(fact));
+
+	return fact;
 };
 
 const run = async () => {
@@ -93,7 +113,7 @@ const run = async () => {
 	app.get('/fact', (_req, res) => {
 		getFact()
 			.then((fact) => {
-				res.status(200).send(fact);
+				res.status(200).send(`${fact.en}\n${fact.fr}`);
 			})
 			.catch((err) => {
 				console.error(err);
